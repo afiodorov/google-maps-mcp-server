@@ -2,6 +2,8 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
@@ -31,8 +33,8 @@ import {
   TimezoneGetSchema
 } from './types.js';
 
-class GoogleMapsMCPServer {
-  private server: Server;
+export class GoogleMapsMCPServer {
+  readonly server: Server;
   private googleMapsClient: GoogleMapsClient;
 
   constructor() {
@@ -230,7 +232,7 @@ class GoogleMapsMCPServer {
             inputSchema: {
               type: 'object',
               properties: {
-                photo_reference: { type: 'string', description: 'Photo reference from place details' },
+                photo_reference: { type: 'string', description: 'Photo name from place details ("places/…/photos/…"), or a legacy photo reference' },
                 max_width: { type: 'number', description: 'Maximum width in pixels' },
                 max_height: { type: 'number', description: 'Maximum height in pixels' }
               },
@@ -618,7 +620,8 @@ class GoogleMapsMCPServer {
                 }
               }, null, 2)
             }
-          ]
+          ],
+          isError: true
         };
       }
     });
@@ -1069,6 +1072,8 @@ class GoogleMapsMCPServer {
   }
 }
 
-// Start the server
-const server = new GoogleMapsMCPServer();
-server.run().catch(console.error);
+// Start the stdio server when run directly (not when imported, e.g. by lambda.ts)
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const server = new GoogleMapsMCPServer();
+  server.run().catch(console.error);
+}

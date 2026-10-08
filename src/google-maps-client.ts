@@ -151,8 +151,10 @@ export class GoogleMapsClient {
         return data;
       } catch (error) {
         if (retries === 1) {
-          const message = error instanceof Error ? error.message : 'Unknown error';
-          const context: any = { endpoint, url: url.toString() };
+          const message = error instanceof Error ? error.message : (error as any)?.message || 'Unknown error';
+          const safeUrl = new URL(url);
+          safeUrl.searchParams.delete('key'); // errors reach the client; the key must not
+          const context: any = { endpoint, url: safeUrl.toString() };
 
           // Add more context if it's an MCP error
           if (typeof error === 'object' && error !== null && 'context' in error) {
@@ -348,17 +350,36 @@ export class GoogleMapsClient {
     return this.formatPlaceResult(data);
   }
 
+  // Returns a googleusercontent.com URL that works without the API key, so the key
+  // never reaches the client. Accepts a Places API (New) photo name
+  // ("places/…/photos/…", as places_details returns) or a legacy photo reference.
   async placesPhotos(photoReference: string, maxWidth?: number, maxHeight?: number): Promise<string> {
+    if (photoReference.startsWith('places/')) {
+      const params: any = { skipHttpRedirect: true };
+      if (maxWidth) params.maxWidthPx = maxWidth;
+      if (maxHeight) params.maxHeightPx = maxHeight;
+      if (!maxWidth && !maxHeight) params.maxWidthPx = 1600;
+      const data = await this.makeRequest(`/v1/${photoReference}/media`, params, 'GET', undefined, undefined, 'https://places.googleapis.com');
+      return data.photoUri;
+    }
+
     const params: any = { photoreference: photoReference };
     if (maxWidth) params.maxwidth = maxWidth;
     if (maxHeight) params.maxheight = maxHeight;
+    if (!maxWidth && !maxHeight) params.maxwidth = 1600;
 
     const url = new URL(`${this.baseUrl}/place/photo`);
     Object.entries({ ...params, key: this.apiKey }).forEach(([key, value]) => {
       url.searchParams.append(key, String(value));
     });
 
-    return url.toString();
+    // The legacy endpoint redirects to the image; hand out the redirect target.
+    const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(10000) });
+    const location = response.headers.get('location');
+    if (!location) {
+      throw this.createMCPError('PHOTO_NOT_FOUND', `Photo request failed: HTTP ${response.status}`, { endpoint: '/place/photo' });
+    }
+    return location;
   }
 
   // Routes API v2 methods
