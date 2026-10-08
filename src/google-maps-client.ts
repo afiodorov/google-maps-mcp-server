@@ -1,5 +1,14 @@
 import { GeocodeResult, Location, MCPError, PlaceResult, RouteResult } from './types.js';
 
+// Places API (New) price levels, indexed by the 0-4 scale the tools use.
+const PRICE_LEVELS = [
+  'PRICE_LEVEL_FREE',
+  'PRICE_LEVEL_INEXPENSIVE',
+  'PRICE_LEVEL_MODERATE',
+  'PRICE_LEVEL_EXPENSIVE',
+  'PRICE_LEVEL_VERY_EXPENSIVE'
+];
+
 export class GoogleMapsClient {
   private apiKey: string;
   private baseUrl = 'https://maps.googleapis.com/maps/api';
@@ -263,9 +272,10 @@ export class GoogleMapsClient {
     if (options.includedTypes?.length) body.includedTypes = options.includedTypes;
     if (options.excludedTypes?.length) body.excludedTypes = options.excludedTypes;
     if (options.openNow !== undefined) body.openNow = options.openNow;
-    if (options.priceLevels?.length) body.priceLevels = options.priceLevels;
+    if (options.priceLevels?.length) body.priceLevels = options.priceLevels.map(level => PRICE_LEVELS[level]).filter(Boolean);
     if (options.minRating) body.minRating = options.minRating;
-    if (options.locationBias) body.locationBias = options.locationBias;
+    if (options.locationBias) body.locationBias = this.formatLocationBias(options.locationBias);
+    if (options.maxResults) body.pageSize = options.maxResults;
     if (options.rankPreference) body.rankPreference = options.rankPreference;
     if (options.language) body.languageCode = options.language;
     if (options.region) body.regionCode = options.region;
@@ -320,7 +330,7 @@ export class GoogleMapsClient {
     const body: any = { input };
 
     if (options.sessionToken) body.sessionToken = options.sessionToken;
-    if (options.locationBias) body.locationBias = options.locationBias;
+    if (options.locationBias) body.locationBias = this.formatLocationBias(options.locationBias);
     if (options.includedTypes?.length) body.includedTypes = options.includedTypes;
     if (options.language) body.languageCode = options.language;
     if (options.region) body.regionCode = options.region;
@@ -563,13 +573,16 @@ export class GoogleMapsClient {
     return places.map(place => this.formatPlaceResult(place));
   }
 
+  // Handles both legacy (snake_case) and Places API (New) (camelCase) results; in the
+  // new API `name` is the resource name ("places/…") and the label is displayName.
   private formatPlaceResult(place: any): PlaceResult {
     const result: PlaceResult = {
       id: place.place_id || place.id,
-      name: place.name || place.displayName?.text || 'Unknown'
+      name: place.displayName?.text || place.name || 'Unknown'
     };
 
-    if (place.formatted_address) result.formatted_address = place.formatted_address;
+    const address = place.formatted_address || place.formattedAddress;
+    if (address) result.formatted_address = address;
     if (place.geometry?.location) {
       result.location = {
         lat: place.geometry.location.lat,
@@ -577,17 +590,49 @@ export class GoogleMapsClient {
       };
     } else if (place.location) {
       result.location = {
-        lat: place.location.latitude || place.location.lat,
-        lng: place.location.longitude || place.location.lng
+        lat: place.location.latitude ?? place.location.lat,
+        lng: place.location.longitude ?? place.location.lng
       };
     }
     if (place.rating) result.rating = place.rating;
+    if (place.userRatingCount) result.user_rating_count = place.userRatingCount;
     if (place.price_level !== undefined) result.price_level = place.price_level;
+    else if (place.priceLevel && PRICE_LEVELS.includes(place.priceLevel)) result.price_level = PRICE_LEVELS.indexOf(place.priceLevel);
     if (place.types) result.types = place.types;
-    if (place.opening_hours) result.opening_hours = place.opening_hours;
-    if (place.photos) result.photos = place.photos;
+    if (place.primaryType) result.primary_type = place.primaryType;
+    const hours = place.currentOpeningHours || place.regularOpeningHours;
+    const openNow = place.opening_hours?.open_now ?? hours?.openNow;
+    if (openNow !== undefined) result.open_now = openNow;
+    if (hours?.weekdayDescriptions) result.opening_hours = hours.weekdayDescriptions;
+    if (place.googleMapsUri) result.google_maps_uri = place.googleMapsUri;
+    if (place.websiteUri) result.website = place.websiteUri;
+    if (place.internationalPhoneNumber) result.phone = place.internationalPhoneNumber;
+    // Only what places_photos needs; the full objects carry long attribution lists.
+    if (place.photos) {
+      result.photos = place.photos.slice(0, 5).map((photo: any) => ({
+        photo_reference: photo.name || photo.photo_reference,
+        width: photo.widthPx ?? photo.width,
+        height: photo.heightPx ?? photo.height
+      }));
+    }
 
     return result;
+  }
+
+  // The tools take {circle: {center: {lat, lng}, radius_meters}}; Places API (New)
+  // wants latitude/longitude and radius.
+  private formatLocationBias(bias: any): any {
+    const circle = bias?.circle;
+    if (!circle?.center) return bias;
+    return {
+      circle: {
+        center: {
+          latitude: circle.center.latitude ?? circle.center.lat,
+          longitude: circle.center.longitude ?? circle.center.lng
+        },
+        radius: circle.radius ?? circle.radius_meters
+      }
+    };
   }
 
   private formatRouteResult(route: any): RouteResult {

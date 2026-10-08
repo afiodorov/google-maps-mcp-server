@@ -220,19 +220,19 @@ export interface PlaceResult {
   formatted_address?: string;
   location?: Location;
   rating?: number;
+  user_rating_count?: number;
   price_level?: number;
   types?: string[];
-  opening_hours?: {
-    open_now?: boolean;
-    periods?: Array<{
-      open: { day: number; time: string };
-      close?: { day: number; time: string };
-    }>;
-  };
+  primary_type?: string;
+  open_now?: boolean;
+  opening_hours?: string[];
+  google_maps_uri?: string;
+  website?: string;
+  phone?: string;
   photos?: Array<{
     photo_reference: string;
-    height: number;
-    width: number;
+    height?: number;
+    width?: number;
   }>;
 }
 
